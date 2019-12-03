@@ -16,7 +16,7 @@ clock = pygame.time.Clock()
 skratImg = pygame.image.load("skrat.png")
 skratImg = pygame.transform.scale(skratImg, (40, 40))
 
-def skrat(x, y):
+def drawSkrat(x, y):
     gameDisplay.blit(skratImg, (x, y))
 
 def createNewSkrat():
@@ -35,7 +35,7 @@ def drawNotes():
         textRect.center = (idx * (width / len(notes)) + 25, height - 25)
         pygame.draw.rect(gameDisplay, separator, [idx * (width / len(notes)) + 50, 0, 1, height])
         gameDisplay.blit(textSurface, textRect)
-    pygame.display.update()
+    #pygame.display.update()
 
 def game():
     yChange = 3
@@ -48,13 +48,12 @@ def game():
                 endGame = True
             if event.type == pygame.KEYUP:
                 targets = targets[1:]
-                print("Hit detected")
         gameDisplay.fill(background)
         for target in targets:
             target[1] += yChange
             if target[1] > height:
                 target[1] = 0
-            skrat(target[0], target[1])
+            drawSkrat(target[0], target[1])
         drawNotes()
         pygame.display.update()
         clock.tick(30)
@@ -63,6 +62,41 @@ def game():
             targets.append(createNewSkrat())
             generationCounter = 0
 
+def menu():
+    startMenu = True
+    while startMenu:
+        for event in pygame.event.get():
+            #print(event)
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                quit()
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                mouse = pygame.mouse.get_pos()
+                if width / 2 - 100 < mouse[0] < width / 2 + 100:
+                    if 0.25 * height - 50 < mouse[1] < 0.25 * height + 50:
+                        #print("Start button clicked")
+                        startMenu = False
+                    elif 0.75 * height - 50 < mouse[1] < 0.75 * height + 50:
+                        #print("Close button")
+                        pygame.quit()
+                        quit()
+        gameDisplay.fill(background)
+        pygame.draw.rect(gameDisplay, separator, [width / 2 - 100, 0.25 * height - 50, 200, 100])
+        pygame.draw.rect(gameDisplay, separator, [width / 2 - 100, 0.75 * height - 50, 200, 100])
+        font = pygame.font.Font("bahnschrift.ttf", 36)
+        textSurface = font.render("Start", True, background)
+        textRect = textSurface.get_rect()
+        textRect.center = (width / 2, 0.25 * height)
+        gameDisplay.blit(textSurface, textRect)
+
+        textSurface = font.render("TODO", True, background)
+        textRect = textSurface.get_rect()
+        textRect.center = (width / 2, 0.75 * height)
+        gameDisplay.blit(textSurface, textRect)
+        pygame.display.update()
+        clock.tick(30)
+
+menu()
 game()
 pygame.quit()
 quit()
