@@ -3,17 +3,20 @@ import random
 import noteDetector
 import threading
 import queue
+import math
 
 class Skrat:
-    def __init__(self, xTop, yTop, xBot, yBot, midiNo):
+    def __init__(self, xTop, yTop, xBot, yBot, midiNo, string, fret):
         self.xTop = xTop
         self.yTop = yTop
         self.xBot = xBot
         self.yBot = yBot
         self.midiNo = midiNo
+        self.string = string
+        self.fret = fret
 
     def move(self):
-        self.xTop -= 1
+        self.xTop -= 3
 
 
 pygame.init()
@@ -90,7 +93,7 @@ skratImg = pygame.transform.scale(skratImg, (40, 40))
 
 def drawSkrat(skrat):
     gameDisplay.blit(skratImg, (skrat.xTop, skrat.yTop))
-    gameDisplay.blit(skratImg, (skrat.xBot, skrat.yBot))
+    #gameDisplay.blit(skratImg, (skrat.xBot, skrat.yBot))
 
 
 def createNewSkrat(h, w):
@@ -102,7 +105,7 @@ def createNewSkrat(h, w):
     print("Creating skrat", note, "at location", string, fret)
     skrat = Skrat(w + 50, (string - 0.5) * stringSpacing,  # Top half of window
                   (fret + 0.125) * fretWidth, h / 2 + (string - 0.5) * stringSpacing,
-                  midi)
+                  midi, string, fret)
     return skrat
 
 
@@ -110,6 +113,20 @@ def midiNumberToNoteName(x):
     octave = int(x / 12) - 1
     note = notes[x % 12]
     return str(note) + str(octave)
+
+def distanceBetweenNotes(note1, note2):
+    return math.sqrt((note1[0] - note2[0]) ** 2 + (note1[1] - note2[1]) ** 2)
+
+def closestWrongNote(notePos, playedNote):
+    possibleLocations = fretboardNotes[playedNote]
+    distance = 999
+    closestNote = None
+    for pos in possibleLocations:
+        d = distanceBetweenNotes(notePos, pos)
+        if d < distance:
+            distance = d
+            closestNote = pos
+    return closestNote
 
 
 def drawNotes():
@@ -125,6 +142,7 @@ def drawNotes():
 
 
 def drawNotes2():
+    font = pygame.font.SysFont("Verdana", 22)
     w, h = pygame.display.get_surface().get_size()
     fretWidth = w / 21  # Maybe more?
     stringSpacing = h / 14
@@ -134,8 +152,16 @@ def drawNotes2():
     # Draw fret markers
     for i in [3, 5, 7, 9, 15, 17, 19]:
         pygame.draw.circle(gameDisplay, separator, [int((i + 0.5) * fretWidth), int(3.5 * stringSpacing + h / 2)], 10)
+        textSurface = font.render(str(i), True, separator)
+        textRect = textSurface.get_rect()
+        textRect.center = (int((i + 0.5) * fretWidth), h / 2)
+        gameDisplay.blit(textSurface, textRect)
     pygame.draw.circle(gameDisplay, separator, [int(12.5 * fretWidth), int(1.5 * stringSpacing + h / 2)], 10)
     pygame.draw.circle(gameDisplay, separator, [int(12.5 * fretWidth), int(5.5 * stringSpacing + h / 2)], 10)
+    textSurface = font.render("12", True, separator)
+    textRect = textSurface.get_rect()
+    textRect.center = ((12.5 * fretWidth), h / 2)
+    gameDisplay.blit(textSurface, textRect)
     # Drawing strings
     for i in range(6):
         # Top half
@@ -224,6 +250,7 @@ def game2():
     detectorThread.start()
     pygame.font.init()
     font = pygame.font.SysFont("Verdana", 24)
+    noteFont = pygame.font.SysFont("Verdana", 22)
     while not endGame:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -231,8 +258,8 @@ def game2():
                 endGame = True
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_UP:
-                    exitQ.put(0)
-                    endGame = True
+                    targets.append(createNewSkrat(h, w))
+                    targets = targets[1:]
                 if event.key == pygame.K_k:
                     xChange += 1
                 if event.key == pygame.K_j:
@@ -246,6 +273,11 @@ def game2():
             #    score -= 1
             #else:
             drawSkrat(target)
+        pygame.draw.circle(gameDisplay, (255, 0, 0), [int(targets[0].xBot + 22), int(targets[0].yBot + 25)], int(w/62))
+        textSurface = noteFont.render(midiNumberToNoteName(targets[0].midiNo)[:-1], True, (255, 255, 255))
+        textRect = textSurface.get_rect()
+        textRect.center = (int(targets[0].xBot + 22), int(targets[0].yBot + 25))
+        gameDisplay.blit(textSurface, textRect)
         fontSur = font.render("Score: " + str(score), False, (255, 255, 255))
         gameDisplay.blit(fontSur, (w / 2, 0))
         pygame.display.update()
@@ -253,16 +285,17 @@ def game2():
         generationCounter += 1
         if generationCounter == 60:
             generationCounter = 0
-        elif generationCounter % 2 == 0: #== 30:
+        elif generationCounter % 2 == 0:  # == 30:
             if not noteQ.empty():
-                #detected = notesDict[noteQ.get()]
                 detected = noteQ.get()
-                #print("Detected note is ", detected, "wanted is", targets[0][2])
                 if len(targets) > 0 and detected == targets[0].midiNo:
                     targets.append(createNewSkrat(h, w))
                     targets = targets[1:]
                     score += 1
                     print("NOTE", detected, "Hit detected")
+                else:
+                    wrongNote = closestWrongNote([targets[0].string, targets[0].fret], midiNumberToNoteName(detected))
+                    print("Looking for", midiNumberToNoteName(targets[0].midiNo), "got", midiNumberToNoteName(detected), "at", wrongNote)
     detectorThread.join()
     print("Thread joined")
 
@@ -271,7 +304,6 @@ def menu():
     startMenu = True
     while startMenu:
         for event in pygame.event.get():
-            #print(event)
             if event.type == pygame.QUIT:
                 pygame.quit()
                 quit()
@@ -279,10 +311,8 @@ def menu():
                 mouse = pygame.mouse.get_pos()
                 if width / 2 - 100 < mouse[0] < width / 2 + 100:
                     if 0.25 * height - 50 < mouse[1] < 0.25 * height + 50:
-                        #print("Start button clicked")
                         startMenu = False
                     elif 0.75 * height - 50 < mouse[1] < 0.75 * height + 50:
-                        #print("Close button")
                         pygame.quit()
                         quit()
         gameDisplay.fill(background)
@@ -304,7 +334,7 @@ def menu():
     game2()
 
 
-# menu()
-game2()
+menu()
+# game2()
 pygame.quit()
 quit()
