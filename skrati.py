@@ -4,6 +4,7 @@ import noteDetector
 import threading
 import queue
 import math
+import time
 
 class Skrat:
     def __init__(self, xTop, yTop, xBot, yBot, midiNo, string, fret):
@@ -76,12 +77,17 @@ fretboardNotes = {
     "A5": [[1, 17]],
     "A#5": [[1, 18]],
     "B5": [[1, 19]],
-    "C6": [[1, 20]]
+    "C6": [[1, 20]],
+    "C#6": [[1, 21]],
+    "D6": [[1, 22]],
+    "D#6": [[1, 23]],
+    "E6": [[1, 24]]
 }
 minMidi = 40  # Midi value of lowest note (open E = E2)
 maxMidi = 84  # Max note C6
 notesDict = {notes[i]: i for i in range(len(notes))}
 gameDisplay = pygame.display.set_mode((width, height))
+wrongNotes = []
 pygame.display.set_caption("Glasbeni škrati")
 clock = pygame.time.Clock()
 stringsFont = pygame.font.Font("bahnschrift.ttf", 32)
@@ -96,12 +102,21 @@ def drawSkrat(skrat):
     #gameDisplay.blit(skratImg, (skrat.xBot, skrat.yBot))
 
 
-def createNewSkrat(h, w):
+def createNewSkrat(h, w, string=None, fret=None, midiNote=None):
     stringSpacing = h / 14
     fretWidth = w / 21
-    midi = random.randrange(minMidi, maxMidi)
+    if midiNote is None:
+        midi = random.randrange(minMidi, maxMidi)
+    else:
+        midi = midiNote
+    print(midiNote)
     note = midiNumberToNoteName(midi)
-    string, fret = fretboardNotes[note][random.randrange(0, len(fretboardNotes[note]))]
+    print(note)
+    if string is None and fret is None:
+        string, fret = fretboardNotes[note][random.randrange(0, len(fretboardNotes[note]))]
+    else:
+        string = int(string)
+        fret = int(fret)
     print("Creating skrat", note, "at location", string, fret)
     skrat = Skrat(w + 50, (string - 0.5) * stringSpacing,  # Top half of window
                   (fret + 0.125) * fretWidth, h / 2 + (string - 0.5) * stringSpacing,
@@ -114,11 +129,45 @@ def midiNumberToNoteName(x):
     note = notes[x % 12]
     return str(note) + str(octave)
 
+
+def noteNameToMidiNumber(x):
+    print("Note", x)
+    print("Got", (int(x[-1]) - 1) * 12 + notes.index(x[:-1]))
+    return (int(x[-1]) - 1) * 12 + 24 + notes.index(x[:-1])
+
+
 def distanceBetweenNotes(note1, note2):
     return math.sqrt((note1[0] - note2[0]) ** 2 + (note1[1] - note2[1]) ** 2)
 
+
+def readInputNotes(file):
+    notes = []
+    startingPos = []
+    f = open(file, "r")
+    for line in f:
+        l = line.strip().split(",")
+        if len(l) > 1:
+            startingPos.append(l[1])
+            startingPos.append(l[2])
+        else:
+            notes.append(l[0])
+    return startingPos, notes
+
+
 def closestWrongNote(notePos, playedNote):
     possibleLocations = fretboardNotes[playedNote]
+    distance = 999
+    closestNote = None
+    for pos in possibleLocations:
+        d = distanceBetweenNotes(notePos, pos)
+        if d < distance:
+            distance = d
+            closestNote = pos
+    return closestNote
+
+
+def closestNextNote(notePos, nextNote):
+    possibleLocations = fretboardNotes[nextNote]
     distance = 999
     closestNote = None
     for pos in possibleLocations:
@@ -133,7 +182,7 @@ def drawNotes():
     font = pygame.font.Font("bahnschrift.ttf", 32)
     for idx in range(len(notes)):
         note = notes[idx]
-        textSurface = font.render(note, True, (255,255,255))
+        textSurface = font.render(note, True, (255, 255, 255))
         textRect = textSurface.get_rect()
         textRect.center = (idx * (width / len(notes)) + 25, height - 25)
         pygame.draw.rect(gameDisplay, separator, [idx * (width / len(notes)) + 50, 0, 1, height])
@@ -235,22 +284,31 @@ def drawNotes2():
     print("Thread joined")"""
 
 
-def game2():
+# Mode 0 = random notes, mode 1 = playing a song
+def game2(mode=0):
     xChange = 2
     generationCounter = 0
     score = 0
-
     endGame = False
     noteQ = queue.Queue()
     exitQ = queue.Queue()
     pygame.display.set_mode((1200, 600))
     w, h = pygame.display.get_surface().get_size()
-    targets = [createNewSkrat(h, w)]
+    noteSequence = []
+    noteCounter = 0
+    if mode == 1:
+        startingPos, noteSequence = readInputNotes("happybirthday.txt")
+        noteCounter = 1
+        targets = [createNewSkrat(h, w, startingPos[0], startingPos[1], noteNameToMidiNumber(noteSequence[0]))]
+    else:
+        targets = [createNewSkrat(h, w)]
     detectorThread = threading.Thread(target=noteDetector.NoteDetector, args=(noteQ, exitQ))
     detectorThread.start()
     pygame.font.init()
     font = pygame.font.SysFont("Verdana", 24)
     noteFont = pygame.font.SysFont("Verdana", 22)
+    xDetected = yDetected = 0
+    lastNote = None
     while not endGame:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -274,14 +332,15 @@ def game2():
             #else:
             drawSkrat(target)
         pygame.draw.circle(gameDisplay, (255, 0, 0), [int(targets[0].xBot + 22), int(targets[0].yBot + 25)], int(w/62))
+        # Wrong circle draw
+        if xDetected > 0 and yDetected > 0:
+            pygame.draw.circle(gameDisplay, (255, 120, 0), [int(xDetected + 28), int(yDetected)], int(w / 62))
         textSurface = noteFont.render(midiNumberToNoteName(targets[0].midiNo)[:-1], True, (255, 255, 255))
         textRect = textSurface.get_rect()
         textRect.center = (int(targets[0].xBot + 22), int(targets[0].yBot + 25))
         gameDisplay.blit(textSurface, textRect)
         fontSur = font.render("Score: " + str(score), False, (255, 255, 255))
         gameDisplay.blit(fontSur, (w / 2, 0))
-        pygame.display.update()
-        clock.tick(30)
         generationCounter += 1
         if generationCounter == 60:
             generationCounter = 0
@@ -289,18 +348,122 @@ def game2():
             if not noteQ.empty():
                 detected = noteQ.get()
                 if len(targets) > 0 and detected == targets[0].midiNo:
-                    targets.append(createNewSkrat(h, w))
+                    if mode == 0:
+                        targets.append(createNewSkrat(h, w))
+                    else:
+                        if noteCounter == len(noteSequence):
+                            exitQ.put(0)
+                            break
+                        nextLoc = closestNextNote([targets[0].string, targets[0].fret],
+                                                  noteSequence[noteCounter])
+                        targets.append(createNewSkrat(h, w, nextLoc[0], nextLoc[1],
+                                                      noteNameToMidiNumber(noteSequence[noteCounter])))
+                        noteCounter += 1
                     targets = targets[1:]
                     score += 1
-                    print("NOTE", detected, "Hit detected")
+                    xDetected = yDetected = 0
+                    lastNote = detected
                 else:
-                    wrongNote = closestWrongNote([targets[0].string, targets[0].fret], midiNumberToNoteName(detected))
-                    print("Looking for", midiNumberToNoteName(targets[0].midiNo), "got", midiNumberToNoteName(detected), "at", wrongNote)
+                    if detected != lastNote:
+                        wrongNote = closestWrongNote([targets[0].string, targets[0].fret], midiNumberToNoteName(detected))
+                        xDetected = wrongNote[1] * (w / 21)
+                        yDetected = h / 2 + wrongNote[0] * (h / 14)
+                        print("Looking for", midiNumberToNoteName(targets[0].midiNo), "got", midiNumberToNoteName(detected),
+                              "at", wrongNote)
+        pygame.display.update()
+        clock.tick(30)
+
+    detectorThread.join()
+    print("Thread joined")
+    menu()
+
+def practiceMode():
+    xChange = 2
+    generationCounter = 0
+    score = 0
+    endGame = False
+    noteQ = queue.Queue()
+    exitQ = queue.Queue()
+    pygame.display.set_mode((1200, 600))
+    w, h = pygame.display.get_surface().get_size()
+    #targets = [createNewSkrat(h, w)]
+    detectorThread = threading.Thread(target=noteDetector.NoteDetector, args=(noteQ, exitQ))
+    detectorThread.start()
+    pygame.font.init()
+    font = pygame.font.SysFont("Verdana", 24)
+    noteFont = pygame.font.SysFont("Verdana", 22)
+    detectedLocations = []
+    noteName = None
+    lastNote = None
+    while not endGame:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                exitQ.put(0)
+                endGame = True
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_UP:
+                    targets.append(createNewSkrat(h, w))
+                    targets = targets[1:]
+                if event.key == pygame.K_k:
+                    xChange += 1
+                if event.key == pygame.K_j:
+                    xChange -= 1
+        gameDisplay.fill(background)
+        drawNotes2()
+        # for target in targets:
+            # target.move()
+            #if target[1] > height:
+            #    targets.remove(target)
+            #    score -= 1
+            #else:
+            # drawSkrat(target)
+        #pygame.draw.circle(gameDisplay, (255, 0, 0), [int(targets[0].xBot + 22), int(targets[0].yBot + 25)], int(w/62))
+        # Wrong circle draw
+        if len(detectedLocations) > 0:
+            for location in detectedLocations:
+                xDetected = location[1] * (w / 21)
+                yDetected = h / 2 + location[0] * (h / 14)
+                pygame.draw.circle(gameDisplay, (255, 120, 0), [int(xDetected + 28), int(yDetected)], int(w / 62))
+                textSurface = noteFont.render(noteName[:-1], True, (255, 255, 255))
+                textRect = textSurface.get_rect()
+                textRect.center = (int(xDetected + 28), int(yDetected))
+                gameDisplay.blit(textSurface, textRect)
+        # textSurface = noteFont.render(midiNumberToNoteName(targets[0].midiNo)[:-1], True, (255, 255, 255))
+        # textRect = textSurface.get_rect()
+        # textRect.center = (int(targets[0].xBot + 22), int(targets[0].yBot + 25))
+        # gameDisplay.blit(textSurface, textRect)
+        # fontSur = font.render("Score: " + str(score), False, (255, 255, 255))
+        # gameDisplay.blit(fontSur, (w / 2, 0))
+        generationCounter += 1
+        if generationCounter == 60:
+            generationCounter = 0
+        elif generationCounter % 2 == 0:  # == 30:
+            if not noteQ.empty():
+                detected = noteQ.get()
+                # if len(targets) > 0 and detected == targets[0].midiNo:
+                    # targets.append(createNewSkrat(h, w))
+                    # targets = targets[1:]
+                    # score += 1
+                    # xDetected = yDetected = 0
+                    # lastNote = detected
+                    # print("NOTE", detected, "Hit detected")
+                if detected != lastNote:
+                    #wrongNote = closestWrongNote([targets[0].string, targets[0].fret], midiNumberToNoteName(detected))
+                    noteName = midiNumberToNoteName(detected)
+                    detectedLocations = fretboardNotes[noteName]
+                    # xDetected = wrongNote[1] * (w / 21)
+                    # yDetected = h / 2 + wrongNote[0] * (h / 14)
+                    # print("Looking for", midiNumberToNoteName(targets[0].midiNo), "got", midiNumberToNoteName(detected),
+                          # "at", wrongNote)
+        pygame.display.update()
+        clock.tick(30)
+
     detectorThread.join()
     print("Thread joined")
 
 
 def menu():
+    pygame.display.set_mode((width, height))
     startMenu = True
     while startMenu:
         for event in pygame.event.get():
@@ -309,22 +472,29 @@ def menu():
                 quit()
             if event.type == pygame.MOUSEBUTTONDOWN:
                 mouse = pygame.mouse.get_pos()
-                if width / 2 - 100 < mouse[0] < width / 2 + 100:
+                if width / 2 - 175 < mouse[0] < width / 2 + 175:
                     if 0.25 * height - 50 < mouse[1] < 0.25 * height + 50:
-                        startMenu = False
+                        game2(0)
+                    elif 0.5 * height - 50 < mouse[1] < 0.5 * height + 50:
+                        game2(1)
                     elif 0.75 * height - 50 < mouse[1] < 0.75 * height + 50:
-                        pygame.quit()
-                        quit()
+                        practiceMode()
         gameDisplay.fill(background)
-        pygame.draw.rect(gameDisplay, separator, [width / 2 - 100, 0.25 * height - 50, 200, 100])
-        pygame.draw.rect(gameDisplay, separator, [width / 2 - 100, 0.75 * height - 50, 200, 100])
+        pygame.draw.rect(gameDisplay, separator, [width / 2 - 175, 0.25 * height - 50, 350, 100])
+        pygame.draw.rect(gameDisplay, separator, [width / 2 - 175, 0.5 * height - 50, 350, 100])
+        pygame.draw.rect(gameDisplay, separator, [width / 2 - 175, 0.75 * height - 50, 350, 100])
         font = pygame.font.Font("bahnschrift.ttf", 36)
-        textSurface = font.render("Start", True, background)
+        textSurface = font.render("Naključen način", True, background)
         textRect = textSurface.get_rect()
         textRect.center = (width / 2, 0.25 * height)
         gameDisplay.blit(textSurface, textRect)
 
-        textSurface = font.render("TODO", True, background)
+        textSurface = font.render("Zaigraj melodijo", True, background)
+        textRect = textSurface.get_rect()
+        textRect.center = (width / 2, 0.5 * height)
+        gameDisplay.blit(textSurface, textRect)
+
+        textSurface = font.render("Učni način", True, background)
         textRect = textSurface.get_rect()
         textRect.center = (width / 2, 0.75 * height)
         gameDisplay.blit(textSurface, textRect)
@@ -335,6 +505,7 @@ def menu():
 
 
 menu()
-# game2()
+#game2(1)
+#practiceMode()
 pygame.quit()
 quit()
