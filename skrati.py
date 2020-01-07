@@ -6,10 +6,8 @@ import queue
 import math
 import pyaudio
 import os
-import time
-
-# TODO: meni za izbiranje melodije, meni za izbor vhodne naprave,
-#       v neskončnih načinih igranja gumb za izhod nazaj v meni
+import pygame_textinput
+import json
 
 class Skrat:
     def __init__(self, xTop, yTop, xBot, yBot, midiNo, string, fret):
@@ -91,12 +89,33 @@ class skratGame:
             "E6": [[1, 24]]
         }
         self.songDir = {}
+        self.highScores = {}
+        tmpFilenames = os.listdir("leaderboards")
         for f in os.listdir("songs"):
             file = open("songs/" + f, "r", encoding="utf-8")
             title = file.readline().strip()
             self.songDir[title] = "songs/" + f
+            if f in tmpFilenames:
+                file2 = open("leaderboards/" + f, "r")
+                self.highScores[f] = json.loads(file2.read())
+                file2.close()
+            else:
+                file2 = open("leaderboards/" + f, "w")
+                self.highScores[f] = [[],[]]
+                file2.write(json.dumps(self.highScores[f]))
+                file2.close()
             file.close()
-        print(self.songDir)
+        f = "random.txt"
+        if f in tmpFilenames:
+            file2 = open("leaderboards/" + f, "r")
+            self.highScores[f] = json.loads(file2.read())
+            file2.close()
+        else:
+            file2 = open("leaderboards/" + f, "w")
+            self.highScores[f] = [[], []]
+            file2.write(json.dumps(self.highScores[f]))
+            file2.close()
+        print(self.highScores)
         self.minMidi = 40  # Midi value of lowest note (open E = E2)
         self.maxMidi = 84  # Max note C6
         self.notesDict = {self.notes[i]: i for i in range(len(self.notes))}
@@ -122,15 +141,12 @@ class skratGame:
             midi = random.randrange(self.minMidi, self.maxMidi)
         else:
             midi = midiNote
-        print(midiNote)
         note = self.midiNumberToNoteName(midi)
-        print(note)
         if string is None and fret is None:
             string, fret = self.fretboardNotes[note][random.randrange(0, len(self.fretboardNotes[note]))]
         else:
             string = int(string)
             fret = int(fret)
-        print("Creating skrat", note, "at location", string, fret)
         skrat = Skrat(w + 50, (string - 0.5) * stringSpacing,  # Top half of window
                       (fret + 0.125) * fretWidth, h / 2 + (string - 0.5) * stringSpacing,
                       midi, string, fret)
@@ -142,9 +158,6 @@ class skratGame:
         return str(note) + str(octave)
 
     def noteNameToMidiNumber(self, x):
-        print(self.notes)
-        print("Note", x)
-        print("Got", (int(x[-1]) - 1) * 12 + self.notes.index(x[:-1]))
         return (int(x[-1]) - 1) * 12 + 24 + self.notes.index(x[:-1])
 
     def distanceBetweenNotes(self, note1, note2):
@@ -154,16 +167,15 @@ class skratGame:
         songNotes = []
         startingPos = []
         f = open(file, "r")
-        f.readline()  # Discard first line - title of the song
+        title = f.readline()  # Discard first line - title of the song
         for line in f:
             l = line.strip().split(",")
-            print(l)
             if len(l) > 1:
                 startingPos.append(l[1])
                 startingPos.append(l[2])
             else:
                 songNotes.append(l[0])
-        return startingPos, songNotes
+        return title, startingPos, songNotes
 
     def closestWrongNote(self, notePos, playedNote):
         possibleLocations = self.fretboardNotes[playedNote]
@@ -227,59 +239,6 @@ class skratGame:
             self.drawFont(self.stringsFont, (255, 255, 255), fretWidth / 6, stringSpacing * (idx + 1), string)
             idx += 1
 
-    """def game():
-        yChange = 2
-        generationCounter = 0
-        score = 0
-        targets = [createNewSkrat()]
-        endGame = False
-        noteQ = queue.Queue()
-        exitQ = queue.Queue()
-        detectorThread = threading.Thread(target=noteDetector.NoteDetector, args=(noteQ, exitQ))
-        detectorThread.start()
-        pygame.font.init()
-        font = pygame.font.SysFont("Verdana", 30)
-        while not endGame:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    exitQ.put(0)
-                    endGame = True
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_UP:
-                        exitQ.put(0)
-                        endGame = True
-                    if event.key == pygame.K_k:
-                        yChange += 1
-                    if event.key == pygame.K_j:
-                        yChange -= 1
-            self.gameDisplay.fill(self.background)
-            for target in targets:
-                target[1] += yChange
-                if target[1] > self.height:
-                    targets.remove(target)
-                    score -= 1
-                else:
-                    drawSkrat(target[0], target[1])
-            drawNotes()
-            fontSur = font.render("Score: " + str(score), False, (255, 255, 255))
-            self.gameDisplay.blit(fontSur, (10, 10))
-            pygame.display.update()
-            self.clock.tick(30)
-            generationCounter += 1
-            if generationCounter == 60:
-                targets.append(createNewSkrat())
-                generationCounter = 0
-            elif generationCounter % 2 == 0: #== 30:
-                if not noteQ.empty():
-                    detected = notesDict[noteQ.get()]
-                    #print("Detected note is ", detected, "wanted is", targets[0][2])
-                    if len(targets) > 0 and detected == targets[0][2]:
-                        targets = targets[1:]
-                        score += 1
-                        print("NOTE", detected, "Hit detected")
-        detectorThread.join()
-        print("Thread joined")"""
-
     # Mode 0 = random notes, mode 1 = playing a song
     def game2(self, mode=0, filename=None):
         xChange = 2
@@ -292,8 +251,9 @@ class skratGame:
         w, h = pygame.display.get_surface().get_size()
         noteSequence = []
         noteCounter = 0
+        title = None
         if mode == 1 and filename is not None:
-            startingPos, noteSequence = self.readInputNotes(filename)
+            title, startingPos, noteSequence = self.readInputNotes(filename)
             noteCounter = 1
             targets = [self.createNewSkrat(h, w, startingPos[0], startingPos[1],
                                            self.noteNameToMidiNumber(noteSequence[0]))]
@@ -302,8 +262,8 @@ class skratGame:
         detectorThread = threading.Thread(target=noteDetector.NoteDetector, args=(noteQ, exitQ, self.deviceIndex))
         detectorThread.start()
         pygame.font.init()
-        font = pygame.font.SysFont("Verdana", 24)
-        noteFont = pygame.font.SysFont("Verdana", 22)
+        font = pygame.font.Font("bahnschrift.ttf", 24)
+        noteFont = pygame.font.Font("bahnschrift.ttf", 22)
         xDetected = yDetected = 0
         lastNote = None
         detectedWrong = None
@@ -314,8 +274,7 @@ class skratGame:
                     endGame = True
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_UP:
-                        targets.append(self.createNewSkrat(h, w))
-                        targets = targets[1:]
+                        noteQ.put(targets[0].midiNo)
                     elif event.key == pygame.K_k:
                         xChange += 1
                     elif event.key == pygame.K_j:
@@ -341,8 +300,8 @@ class skratGame:
                                int(w/62))
             # Wrong circle draw
             if xDetected > 0 and yDetected > 0:
-                pygame.draw.circle(self.gameDisplay, (255, 120, 0), [int(xDetected + 28), int(yDetected)], int(w / 62))
-                self.drawFont(noteFont, (255, 255, 255), int(xDetected + 28), int(yDetected),
+                pygame.draw.circle(self.gameDisplay, (255, 120, 0), [int(xDetected + 22), int(yDetected)], int(w / 62))
+                self.drawFont(noteFont, (255, 255, 255), int(xDetected + 22), int(yDetected),
                               detectedWrong[:-1])
             self.drawFont(noteFont, (255, 255, 255), int(targets[0].xBot + 22), int(targets[0].yBot + 25),
                           self.midiNumberToNoteName(targets[0].midiNo)[:-1])
@@ -377,14 +336,89 @@ class skratGame:
                                                               detectedWrong)
                             xDetected = (wrongNote[1] + 0.125) * (w / 21)
                             yDetected = h / 2 + wrongNote[0] * (h / 14)
-                            print("Looking for", self.midiNumberToNoteName(targets[0].midiNo), "got",
-                                  self.midiNumberToNoteName(detected), "at", wrongNote)
-                            print(xDetected, yDetected)
+                            # print("Looking for", self.midiNumberToNoteName(targets[0].midiNo), "got",
+                                  # self.midiNumberToNoteName(detected), "at", wrongNote)
             pygame.display.update()
             self.clock.tick(30)
         detectorThread.join()
         print("Thread joined")
         pygame.display.set_mode((self.width, self.height))
+        if score > 0:
+            if mode == 1:
+                self.highScore(filename.split("/")[1], score)
+            else:
+                self.highScore("random.txt", score)
+
+    def highScore(self, title=None, score=10):
+        runLoop = True
+        textinput = pygame_textinput.TextInput(font_family="bahnschrift.ttf",text_color=(255,255,255))
+        pygame.display.set_mode((600, 600))
+        font = pygame.font.Font("bahnschrift.ttf", 32)
+        leaderFont = pygame.font.Font("bahnschrift.ttf", 24)
+        smallFont = pygame.font.Font("bahnschrift.ttf", 16)
+        while runLoop:
+            events = pygame.event.get()
+            for event in events:
+                if event.type == pygame.QUIT:
+                    runLoop = False
+            if textinput.update(events):
+                runLoop = False
+            self.gameDisplay.fill(self.background)
+            self.drawFont(font, self.separator, 300, 200, "Vpiši svoje ime")
+            self.gameDisplay.blit(textinput.get_surface(), (300, 250))
+            pygame.display.update()
+            self.clock.tick(30)
+        name = textinput.get_text()
+        runLoop = True
+        leaderboard = self.highScores[title]
+        ind = 0
+        if len(leaderboard[0]) > 0:
+            while ind < len(leaderboard[0]) and leaderboard[1][ind] > score:
+                ind += 1
+            leaderboard[0].insert(ind, name)
+            leaderboard[1].insert(ind, score)
+        else:
+            leaderboard[0].append(name)
+            leaderboard[1].append(score)
+        file = open("leaderboards/" + title, "w")
+        file.write(json.dumps(leaderboard))
+        file.close()
+        self.highScores[title] = leaderboard
+        if ind <= 9:
+            while runLoop:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        runLoop = False
+                    elif event.type == pygame.MOUSEBUTTONDOWN:
+                        x, y = pygame.mouse.get_pos()
+                        if 10 < x < 80 and 30 < y < 70:  # Back button
+                            runLoop = False
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_RETURN or event.key == pygame.K_BACKSPACE:
+                            runLoop = False
+                self.gameDisplay.fill(self.background)
+                self.drawFont(font, (255, 255, 255), 300, 20, "Lestvica najboljših")
+                vertOffset = 100
+                length = len(leaderboard[0])
+                # Back arrow
+                startX = 10
+                startY = 50
+                pygame.draw.polygon(self.gameDisplay, self.separator, [(startX, startY), (startX + 20, startY - 20),
+                                                                       (startX + 20, startY - 10),
+                                                                       (startX + 70, startY - 10),
+                                                                       (startX + 70, startY + 10),
+                                                                       (startX + 20, startY + 10),
+                                                                       (startX + 20, startY + 20)])
+                self.drawFont(smallFont, self.background, 50, startY, "Nazaj")
+                for i in range(10):
+                    if i >= length:
+                        self.drawFont(leaderFont, (255, 255, 255), 300, vertOffset + i * 40,
+                                      str(i + 1) + ". ---- 0")
+                    else:
+                        self.drawFont(leaderFont, (255, 255, 255), 300, vertOffset + i * 40,
+                                      str(i + 1) + ". " + leaderboard[0][i] + " " + str(leaderboard[1][i]))
+                pygame.display.update()
+                self.clock.tick(30)
 
     def practiceMode(self):
         xChange = 2
@@ -399,7 +433,6 @@ class skratGame:
         detectorThread = threading.Thread(target=noteDetector.NoteDetector, args=(noteQ, exitQ, self.deviceIndex))
         detectorThread.start()
         pygame.font.init()
-        font = pygame.font.SysFont("Verdana", 24)
         noteFont = pygame.font.Font("bahnschrift.ttf", 22)
         detectedLocations = []
         noteName = None
@@ -499,7 +532,7 @@ class skratGame:
 
             self.drawFont(font, self.background, self.width / 2, 0.4 * self.height, "Zaigraj melodijo")
 
-            self.drawFont(font, self.background, self.width / 2, 0.6 * self.height, "Prost način")
+            self.drawFont(font, self.background, self.width / 2, 0.6 * self.height, "Prosta igra")
 
             self.drawFont(font, self.background, self.width / 2, 0.8 * self.height, "Izberi vhod")
 
@@ -513,8 +546,9 @@ class skratGame:
         devices = []
         for i in range(p.get_host_api_info_by_index(0).get("deviceCount")):
             if p.get_device_info_by_host_api_device_index(0, i).get("maxInputChannels") > 0:
-                print("Input " + str(i) + " - " + p.get_device_info_by_host_api_device_index(0, i).get("name"))
+                # print("Input " + str(i) + " - " + p.get_device_info_by_host_api_device_index(0, i).get("name"))
                 devices.append(p.get_device_info_by_host_api_device_index(0, i).get("name"))
+        p.terminate()
         font = pygame.font.Font("bahnschrift.ttf", 20)
         smallFont = pygame.font.Font("bahnschrift.ttf", 16)
         runLoop = True
