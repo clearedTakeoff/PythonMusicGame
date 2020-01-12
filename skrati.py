@@ -115,7 +115,6 @@ class skratGame:
             self.highScores[f] = [[], []]
             file2.write(json.dumps(self.highScores[f]))
             file2.close()
-        print(self.highScores)
         self.minMidi = 40  # Midi value of lowest note (open E = E2)
         self.maxMidi = 84  # Max note C6
         self.notesDict = {self.notes[i]: i for i in range(len(self.notes))}
@@ -173,6 +172,7 @@ class skratGame:
             if len(l) > 1:
                 startingPos.append(l[1])
                 startingPos.append(l[2])
+                songNotes.append(l[0])
             else:
                 songNotes.append(l[0])
         return title, startingPos, songNotes
@@ -242,7 +242,6 @@ class skratGame:
     # Mode 0 = random notes, mode 1 = playing a song
     def game2(self, mode=0, filename=None):
         xChange = 2
-        generationCounter = 0
         score = 0
         endGame = False
         noteQ = queue.Queue()
@@ -291,10 +290,20 @@ class skratGame:
             self.drawNotes()
             for target in targets:
                 target.move()
-                #if target[1] > self.height:
-                #    targets.remove(target)
-                #    score -= 1
-                #else:
+                if target.xTop < 3:
+                    score -= 1
+                    if mode == 0:
+                        targets = [self.createNewSkrat(h, w)]
+                    else:
+                        if noteCounter == len(noteSequence):
+                            exitQ.put(0)
+                            break
+                        nextLoc = self.closestNextNote([targets[0].string, targets[0].fret],
+                                                       noteSequence[noteCounter])
+                        targets = [self.createNewSkrat(h, w, nextLoc[0], nextLoc[1],
+                                                       self.noteNameToMidiNumber(noteSequence[noteCounter]))]
+                        noteCounter += 1
+                    break
                 self.drawSkrat(target)
             pygame.draw.circle(self.gameDisplay, (255, 0, 0), [int(targets[0].xBot + 22), int(targets[0].yBot + 25)],
                                int(w/62))
@@ -305,43 +314,36 @@ class skratGame:
                               detectedWrong[:-1])
             self.drawFont(noteFont, (255, 255, 255), int(targets[0].xBot + 22), int(targets[0].yBot + 25),
                           self.midiNumberToNoteName(targets[0].midiNo)[:-1])
-            fontSur = font.render("Score: " + str(score), False, (255, 255, 255))
+            fontSur = font.render("Točke: " + str(score), False, (255, 255, 255))
             self.gameDisplay.blit(fontSur, (w / 2, 0))
-            generationCounter += 1
-            if generationCounter == 60:
-                generationCounter = 0
-            elif generationCounter % 2 == 0:  # == 30:
-                if not noteQ.empty():
-                    detected = noteQ.get()
-                    if len(targets) > 0 and detected == targets[0].midiNo:
-                        if mode == 0:
-                            targets.append(self.createNewSkrat(h, w))
-                        else:
-                            if noteCounter == len(noteSequence):
-                                exitQ.put(0)
-                                break
-                            nextLoc = self.closestNextNote([targets[0].string, targets[0].fret],
-                                                           noteSequence[noteCounter])
-                            targets.append(self.createNewSkrat(h, w, nextLoc[0], nextLoc[1],
-                                                               self.noteNameToMidiNumber(noteSequence[noteCounter])))
-                            noteCounter += 1
-                        targets = targets[1:]
-                        score += 1
-                        xDetected = yDetected = 0
-                        lastNote = detected
+            if not noteQ.empty():
+                detected = noteQ.get()
+                if len(targets) > 0 and detected == targets[0].midiNo:
+                    if mode == 0:
+                        targets.append(self.createNewSkrat(h, w))
                     else:
-                        if detected != lastNote and detected >= 40:
-                            detectedWrong = self.midiNumberToNoteName(detected)
-                            wrongNote = self.closestWrongNote([targets[0].string, targets[0].fret],
-                                                              detectedWrong)
-                            xDetected = (wrongNote[1] + 0.125) * (w / 21)
-                            yDetected = h / 2 + wrongNote[0] * (h / 14)
-                            # print("Looking for", self.midiNumberToNoteName(targets[0].midiNo), "got",
-                                  # self.midiNumberToNoteName(detected), "at", wrongNote)
+                        if noteCounter == len(noteSequence):
+                            exitQ.put(0)
+                            break
+                        nextLoc = self.closestNextNote([targets[0].string, targets[0].fret],
+                                                       noteSequence[noteCounter])
+                        targets.append(self.createNewSkrat(h, w, nextLoc[0], nextLoc[1],
+                                                           self.noteNameToMidiNumber(noteSequence[noteCounter])))
+                        noteCounter += 1
+                    targets = targets[1:]
+                    score += 1
+                    xDetected = yDetected = 0
+                    lastNote = detected
+                else:
+                    if detected != lastNote and detected >= 40:
+                        detectedWrong = self.midiNumberToNoteName(detected)
+                        wrongNote = self.closestWrongNote([targets[0].string, targets[0].fret],
+                                                          detectedWrong)
+                        xDetected = (wrongNote[1] + 0.125) * (w / 21)
+                        yDetected = h / 2 + wrongNote[0] * (h / 14)
             pygame.display.update()
             self.clock.tick(30)
         detectorThread.join()
-        print("Thread joined")
         pygame.display.set_mode((self.width, self.height))
         if score > 0:
             if mode == 1:
@@ -365,7 +367,7 @@ class skratGame:
                 runLoop = False
             self.gameDisplay.fill(self.background)
             self.drawFont(font, self.separator, 300, 200, "Vpiši svoje ime")
-            self.gameDisplay.blit(textinput.get_surface(), (300, 250))
+            self.gameDisplay.blit(textinput.get_surface(), (275, 250))
             pygame.display.update()
             self.clock.tick(30)
         name = textinput.get_text()
@@ -422,8 +424,6 @@ class skratGame:
 
     def practiceMode(self):
         xChange = 2
-        generationCounter = 0
-        score = 0
         endGame = False
         noteQ = queue.Queue()
         exitQ = queue.Queue()
@@ -475,36 +475,19 @@ class skratGame:
                     yDetected = h / 2 + location[0] * (h / 14)
                     pygame.draw.circle(self.gameDisplay, (255, 120, 0), [int(xDetected + 28), int(yDetected)], int(w / 62))
                     self.drawFont(noteFont, (255, 255, 255), int(xDetected + 28), int(yDetected), noteName[:-1])
-            generationCounter += 1
-            if generationCounter == 60:
-                generationCounter = 0
-            elif generationCounter % 2 == 0:  # == 30:
-                if not noteQ.empty():
-                    detected = noteQ.get()
-                    # if len(targets) > 0 and detected == targets[0].midiNo:
-                        # targets.append(createNewSkrat(h, w))
-                        # targets = targets[1:]
-                        # score += 1
-                        # xDetected = yDetected = 0
-                        # lastNote = detected
-                        # print("NOTE", detected, "Hit detected")
-                    if detected != lastNote:
-                        #wrongNote = closestWrongNote([targets[0].string, targets[0].fret], midiNumberToNoteName(detected))
-                        noteName = self.midiNumberToNoteName(detected)
-                        detectedLocations = self.fretboardNotes[noteName]
-                        # xDetected = wrongNote[1] * (w / 21)
-                        # yDetected = h / 2 + wrongNote[0] * (h / 14)
-                        # print("Looking for", midiNumberToNoteName(targets[0].midiNo), "got", midiNumberToNoteName(detected),
-                              # "at", wrongNote)
+
+            if not noteQ.empty():
+                detected = noteQ.get()
+                if detected != lastNote:
+                    noteName = self.midiNumberToNoteName(detected)
+                    detectedLocations = self.fretboardNotes[noteName]
             pygame.display.update()
             self.clock.tick(30)
         detectorThread.join()
-        print("Thread joined")
         pygame.display.set_mode((self.width, self.height))
 
     def menu(self):
         startMenu = True
-        print("Device index", self.deviceIndex)
         while startMenu:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
